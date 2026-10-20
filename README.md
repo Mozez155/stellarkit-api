@@ -72,6 +72,7 @@ This project is ideal for:
 - [Rate Limiting Strategies Guide](docs/rate-limiting-strategies.md) - Practical guide for high-volume apps: request batching, caching, `?fresh=true` timing, endpoint polling priority, and a complete exponential backoff implementation
 - [Frequently Asked Questions (FAQ)](FAQ.md) - Common setup and contribution questions
 - [Utilities Guide](docs/utilities.md) - All utility endpoints with use cases, curl examples, and sample responses
+- [Claimable Balances Guide](docs/claimable-balances-guide.md) - All claimable balance endpoints, eligible vs pending distinctions, predicate evaluation, and a complete check-and-claim workflow
 - [Asset Endpoints Guide](docs/asset-endpoints.md) - All six asset endpoints with curl examples, sample responses, and guidance on when to use each one
 
 ---
