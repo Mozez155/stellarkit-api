@@ -834,7 +834,6 @@ router.get("/:code/:issuer/price", async (req, res, next) => {
 });
 
 /**
-<<<<<<< HEAD
  * Resolution map for the holder-growth time series.
  *
  * Each resolution defines a look-back window (`windowMs`) and a bucket size
@@ -930,7 +929,73 @@ function aggregateTrustlineGrowth(operations, windowStartMs, bucketMs) {
  * curl "http://localhost:3000/asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/holder-growth?resolution=30d"
  */
 router.get("/:code/:issuer/holder-growth", async (req, res, next) => {
-=======
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+    const resolution = req.query.resolution || "30d";
+
+    if (!HOLDER_GROWTH_RESOLUTIONS[resolution]) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: "Invalid resolution. Accepted values are 7d, 30d, and 90d.",
+          field: "resolution",
+          receivedValue: String(resolution),
+        },
+      });
+    }
+
+    const cacheKey = `asset-holder-growth:${assetCode}:${issuer}:${resolution}`;
+    const fresh = isFreshRequest(req.query);
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const { windowMs, bucketMs } = HOLDER_GROWTH_RESOLUTIONS[resolution];
+    const windowStartMs = Date.now() - windowMs;
+
+    // Fetch recent operations for the issuer and keep only change_trust ops
+    // that target this asset. `limit > 0` is a trustline creation, `limit === 0`
+    // is a trustline deletion (see the change_trust mapping in account.js).
+    const operationsResponse = await server
+      .operations()
+      .forAccount(issuer)
+      .order("desc")
+      .limit(200)
+      .call();
+
+    const records = (operationsResponse.records || []).filter(
+      (op) =>
+        op.type === "change_trust" &&
+        op.asset_code === assetCode &&
+        op.asset_issuer === issuer,
+    );
+
+    const growth = aggregateTrustlineGrowth(records, windowStartMs, bucketMs);
+
+    const data = {
+      growth,
+      asset: normalizeAsset(assetCode, issuer, "credit_alphanum4"),
+      resolution,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.asset);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /asset/:code/:issuer/trading-volume
  *
  * Returns the asset's traded volume, trade count, and distinct traders over
@@ -1007,25 +1072,12 @@ router.get("/:code/:issuer/trading-volume", async (req, res, next) => {
  * Query params:
  *   - resolution (string, optional) — Time window: "7d", "30d", or "90d". Default: "30d".
  *
- * Response:
- *   {
- *     success: true,
- *     data: {
- *       asset: { code, issuer, type },
- *       resolution: string,
- *       history: [{ timestamp: string, supply: string }],
- *       currentSupply: string,
- *       dataPoints: number
- *     }
- *   }
- *
  * Cache TTL: 5 minutes
  *
  * @example
  * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/issuance-history?resolution=7d
  */
 router.get("/:code/:issuer/issuance-history", async (req, res, next) => {
->>>>>>> eb6b36037f8da9c66794fa19c7b9e67473674f5f
   try {
     const { code, issuer } = req.params;
     validateAsset(code, issuer);
@@ -1033,21 +1085,6 @@ router.get("/:code/:issuer/issuance-history", async (req, res, next) => {
     const assetCode = code.toUpperCase();
     const resolution = req.query.resolution || "30d";
 
-<<<<<<< HEAD
-    if (!HOLDER_GROWTH_RESOLUTIONS[resolution]) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          type: "ValidationError",
-          message: "Invalid resolution. Accepted values are 7d, 30d, and 90d.",
-          field: "resolution",
-          receivedValue: String(resolution),
-        },
-      });
-    }
-
-    const cacheKey = `asset-holder-growth:${assetCode}:${issuer}:${resolution}`;
-=======
     const validResolutions = ["7d", "30d", "90d"];
     if (!validResolutions.includes(resolution)) {
       const err = new Error(`Invalid resolution "${resolution}". Valid options are: ${validResolutions.join(", ")}.`);
@@ -1060,7 +1097,6 @@ router.get("/:code/:issuer/issuance-history", async (req, res, next) => {
     }
 
     const cacheKey = `asset-issuance-history:${assetCode}:${issuer}:${resolution}`;
->>>>>>> eb6b36037f8da9c66794fa19c7b9e67473674f5f
     const fresh = isFreshRequest(req.query);
 
     if (!fresh) {
@@ -1071,16 +1107,6 @@ router.get("/:code/:issuer/issuance-history", async (req, res, next) => {
       }
     }
 
-<<<<<<< HEAD
-    const { windowMs, bucketMs } = HOLDER_GROWTH_RESOLUTIONS[resolution];
-    const windowStartMs = Date.now() - windowMs;
-
-    // Fetch recent operations for the issuer and keep only change_trust ops
-    // that target this asset. `limit > 0` is a trustline creation, `limit === 0`
-    // is a trustline deletion (see the change_trust mapping in account.js).
-    const operationsResponse = await server
-      .operations()
-=======
     // Verify asset exists
     const assetsResponse = await server
       .assets()
@@ -1092,8 +1118,8 @@ router.get("/:code/:issuer/issuance-history", async (req, res, next) => {
       throw makeAssetNotFoundError(assetCode, issuer, NETWORK);
     }
 
-    const asset = assetsResponse.records[0];
-    const currentSupply = asset.amount;
+    const assetRecord = assetsResponse.records[0];
+    const currentSupply = assetRecord.amount;
 
     // Calculate time window
     const now = Date.now();
@@ -1104,30 +1130,11 @@ router.get("/:code/:issuer/issuance-history", async (req, res, next) => {
     // Fetch effects related to issuance (payments from issuer, trust line changes)
     const effectsResponse = await server
       .effects()
->>>>>>> eb6b36037f8da9c66794fa19c7b9e67473674f5f
       .forAccount(issuer)
       .order("desc")
       .limit(200)
       .call();
 
-<<<<<<< HEAD
-    const records = (operationsResponse.records || []).filter(
-      (op) =>
-        op.type === "change_trust" &&
-        op.asset_code === assetCode &&
-        op.asset_issuer === issuer,
-    );
-
-    const growth = aggregateTrustlineGrowth(records, windowStartMs, bucketMs);
-
-    const data = {
-      growth,
-      asset: normalizeAsset(assetCode, issuer, "credit_alphanum4"),
-      resolution,
-    };
-
-    cacheService.set(cacheKey, data, cacheTTL.asset);
-=======
     const records = effectsResponse.records || [];
 
     // Build time series by sampling effects
@@ -1139,7 +1146,6 @@ router.get("/:code/:issuer/issuance-history", async (req, res, next) => {
     // Generate sample timestamps
     for (let i = 0; i < totalSamples; i++) {
       const timestamp = new Date(startTime + (i * intervalMs)).toISOString();
-      // Simplified: use current supply as approximation (real implementation would track historical changes)
       history.push({
         timestamp,
         supply: currentSupply,
@@ -1147,7 +1153,7 @@ router.get("/:code/:issuer/issuance-history", async (req, res, next) => {
     }
 
     const data = {
-      asset: normalizeAsset(assetCode, issuer, asset.asset_type),
+      asset: normalizeAsset(assetCode, issuer, assetRecord.asset_type),
       resolution,
       history,
       currentSupply,
@@ -1155,7 +1161,6 @@ router.get("/:code/:issuer/issuance-history", async (req, res, next) => {
     };
 
     cacheService.set(cacheKey, data, 300); // 5 minutes TTL
->>>>>>> eb6b36037f8da9c66794fa19c7b9e67473674f5f
     res.set("X-Cache", "MISS");
     return success(res, data);
   } catch (err) {

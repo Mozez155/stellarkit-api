@@ -570,39 +570,6 @@ const ECOSYSTEM_STATS_CACHE_TTL = 300; // 5 minutes
 router.get("/ecosystem-stats", async (req, res, next) => {
   try {
     const cacheKey = "network-ecosystem-stats";
-const VALIDATOR_QUORUM_CACHE_TTL = 30;
-
-/**
- * GET /network/validator-quorum
- *
- * Returns the current validator quorum health status including total validators,
- * agreeing validators, quorum percentage, and health indicator.
- *
- * Query params:
- *   - fresh (boolean, default: false) — bypasses cache when set to "true"
- *
- * Response shape:
- *   {
- *     success: true,
- *     data: {
- *       totalValidators: <number>,
- *       agreeingValidators: <number>,
- *       quorumPercent: <number>,
- *       isHealthy: <boolean>,
- *       lastLedger: <number>
- *     }
- *   }
- *
- * isHealthy is true when quorumPercent exceeds 66%.
- * Response is cached with a 30 second TTL.
- *
- * @example
- * GET /network/validator-quorum
- * GET /network/validator-quorum?fresh=true
- */
-router.get("/validator-quorum", async (req, res, next) => {
-  try {
-    const cacheKey = "network-validator-quorum";
     const fresh = isFreshRequest(req.query);
 
     if (!fresh) {
@@ -734,6 +701,52 @@ router.get("/validator-quorum", async (req, res, next) => {
       );
     }
     next(err);
+  }
+});
+
+const VALIDATOR_QUORUM_CACHE_TTL = 30;
+
+/**
+ * GET /network/validator-quorum
+ *
+ * Returns the current validator quorum health status including total validators,
+ * agreeing validators, quorum percentage, and health indicator.
+ *
+ * Query params:
+ *   - fresh (boolean, default: false) — bypasses cache when set to "true"
+ *
+ * Response shape:
+ *   {
+ *     success: true,
+ *     data: {
+ *       totalValidators: <number>,
+ *       agreeingValidators: <number>,
+ *       quorumPercent: <number>,
+ *       isHealthy: <boolean>,
+ *       lastLedger: <number>
+ *     }
+ *   }
+ *
+ * isHealthy is true when quorumPercent exceeds 66%.
+ * Response is cached with a 30 second TTL.
+ *
+ * @example
+ * GET /network/validator-quorum
+ * GET /network/validator-quorum?fresh=true
+ */
+router.get("/validator-quorum", async (req, res, next) => {
+  try {
+    const cacheKey = "network-validator-quorum";
+    const fresh = isFreshRequest(req.query);
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
     // Fetch latest ledger to get quorum information
     const ledgerResponse = await withHorizonTiming(req, () =>
       server.ledgers().order("desc").limit(1).call()
@@ -773,7 +786,7 @@ router.get("/validator-quorum", async (req, res, next) => {
     if (err.isKiroError) {
       return next(err);
     }
-    
+
     const quorumErr = new StellarKitError(
       "Unable to fetch validator quorum data.",
       503,

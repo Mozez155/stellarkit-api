@@ -6129,6 +6129,111 @@ router.get("/:id/offers-summary", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/offer-exposure
+ *
+ * Aggregates an account's open DEX sell offers per asset and evaluates
+ * liquidity risk: the percentage of each asset's balance that is locked in
+ * open sell offers.
+ *
+ * liquidityRisk per asset is:
+ *   - "high"   when more than 80 % of the balance is locked in open offers
+ *   - "medium" when between 40 % and 80 % is locked
+ *   - "low"    otherwise (including when there are no offers)
+ *
+ * Response shape:
+ *   {
+ *     accountId: string,
+ *     sellingExposure: [{
+ *       asset: { code, issuer, type },
+ *       balance: string,           // current account balance (seven decimals)
+ *       totalSelling: string,      // sum of open sell offer amounts (seven decimals)
+ *       offerCount: number,
+ *       percentageLocked: string,  // "0.00" – "100.00"
+ *       liquidityRisk: "low" | "medium" | "high"
+ *     }],
+ *     overallLiquidityRisk: "low" | "medium" | "high"
+ *   }
+ *
+ * Returns 404 when the account does not exist.
+ *
+ * @example
+ * GET /account/GABC.../offer-exposure
+ */
+router.get("/:id/offer-exposure", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const offersResponse = await server
+      .offers()
+      .forAccount(id)
+      .limit(200)
+      .order("desc")
+      .call();
+    const records = offersResponse.records || [];
+
+    // Build a map of balance amounts keyed by normalised asset key
+    const balanceMap = new Map();
+    for (const b of (account.balances || [])) {
+      if (isNativeAsset(b)) {
+        balanceMap.set("XLM:null", parseFloat(b.balance || "0"));
+      } else if (isNonNativeAsset(b)) {
+        const key = `${b.asset_code}:${b.asset_issuer}`;
+        balanceMap.set(key, parseFloat(b.balance || "0"));
+      }
+    }
+
+    // Accumulate sell-side exposure per asset
+    const exposureMap = new Map();
+    for (const offer of records) {
+      const code = offer.selling_asset_code || "XLM";
+      const issuer = offer.selling_asset_issuer || null;
+      const type = offer.selling_asset_type || "native";
+      const asset = normalizeAsset(code, issuer, type);
+      const key = `${asset.code}:${asset.issuer}`;
+
+      if (!exposureMap.has(key)) {
+        exposureMap.set(key, { asset, totalSelling: 0, offerCount: 0 });
+      }
+      const entry = exposureMap.get(key);
+      entry.totalSelling += parseFloat(offer.amount || "0");
+      entry.offerCount += 1;
+    }
+
+    const sellingExposure = Array.from(exposureMap.values()).map((entry) => {
+      const balanceKey = `${entry.asset.code}:${entry.asset.issuer}`;
+      const balance = balanceMap.get(balanceKey) ?? 0;
+      const pct = balance > 0 ? (entry.totalSelling / balance) * 100 : 0;
+      const risk = pct > 80 ? "high" : pct > 40 ? "medium" : "low";
+      return {
+        asset: entry.asset,
+        balance: toSevenDecimalString(balance),
+        totalSelling: toSevenDecimalString(entry.totalSelling),
+        offerCount: entry.offerCount,
+        percentageLocked: pct.toFixed(2),
+        liquidityRisk: risk,
+      };
+    });
+
+    const overallRisk = sellingExposure.some((e) => e.liquidityRisk === "high")
+      ? "high"
+      : sellingExposure.some((e) => e.liquidityRisk === "medium")
+        ? "medium"
+        : "low";
+
+    return success(res, {
+      accountId: id,
+      sellingExposure,
+      overallLiquidityRisk: overallRisk,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * GET /account/:id/watchlist-status
  *
  * Checks whether an account appears on any community-maintained Stellar
