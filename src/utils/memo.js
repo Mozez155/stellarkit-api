@@ -205,4 +205,3 @@ function validateMemo(type, value) {
 }
 
 module.exports = { decodeMemo, validateMemo, TEXT_MEMO_MAX_BYTES, HASH_MEMO_BYTES };
-
